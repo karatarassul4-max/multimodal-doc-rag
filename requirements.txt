@@ -1,0 +1,26 @@
+# Web & API
+fastapi>=0.110.0
+uvicorn>=0.28.0
+pydantic-settings>=2.2.0
+python-multipart>=0.0.9
+
+# UI
+streamlit>=1.32.0
+
+# Vector DB & RAG
+qdrant-client>=1.8.0
+langchain>=0.1.12
+langchain-community>=0.0.28
+sentence-transformers>=2.5.1
+
+# CV / OCR / PDF processing
+pdf2image>=1.17.0
+pymupdf>=1.23.26
+pillow>=10.2.0
+torch>=2.2.0
+torchvision>=0.17.0
+ultralytics>=8.1.0        # YOLO для парсинга верстки/таблиц
+
+# Utils
+python-dotenv>=1.0.1
+pytest>=8.0.0
