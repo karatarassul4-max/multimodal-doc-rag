@@ -1,3 +1,12 @@
+import sys
+from pathlib import Path
+
+# Добавляем корень проекта в sys.path для корректных импортов на Streamlit Cloud
+root_dir = Path(__file__).resolve().parent.parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.append(str(root_dir))
+
+
 import tempfile
 import uuid
 import streamlit as st
