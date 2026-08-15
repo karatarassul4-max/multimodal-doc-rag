@@ -3,8 +3,9 @@ title: Multimodal Document AI RAG
 emoji: 📄
 colorFrom: blue
 colorTo: indigo
-sdk: docker
-app_port: 8501
+sdk: streamlit
+sdk_version: 1.32.0
+app_file: src/ui/streamlit_app.py
 pinned: false
 ---
 # Multimodal Document Intelligence & RAG Pipeline
