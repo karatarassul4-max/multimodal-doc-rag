@@ -1,3 +1,12 @@
+---
+title: Multimodal Document AI RAG
+emoji: 📄
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 8501
+pinned: false
+---
 # Multimodal Document Intelligence & RAG Pipeline
 
 ![Python](https://img.shields.io/badge/Python-3.10-blue)
