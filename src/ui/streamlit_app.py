@@ -5,7 +5,7 @@ import io
 import streamlit as st
 from gradio_client import Client
 
-# Попытки импорта библиотек для обработки разных форматов файлов
+# Попытки импорта библиотек для обработки парсинга файлов
 try:
     import pypdf
 except ImportError:
@@ -42,7 +42,7 @@ DEFAULT_TOKEN = st.secrets.get("HF_TOKEN", os.getenv("HF_TOKEN", ""))
 
 st.sidebar.header("Настройки подключения")
 
-# Если секреты заданы, поля скрыты или предзаполнены
+# Если секреты заданы, поля предзаполняются автоматически
 hf_space_url = st.sidebar.text_input("HF Space URL / Name", value=DEFAULT_SPACE)
 hf_token = st.sidebar.text_input("Hugging Face Token", value=DEFAULT_TOKEN, type="password")
 
@@ -50,14 +50,15 @@ st.sidebar.markdown("---")
 detail_level = st.sidebar.selectbox("Уровень детализации", ["Стандартный", "Глубокий"], index=1)
 item_label = st.sidebar.text_input("Метка элементов", value="Страница")
 
-# --- 2. Поддержка всех типов файлов ---
+# --- 2. Ввод данных и обработка универсальных типов файлов ---
 user_instruction = st.text_area("Инструкция / Запрос к документу", value="Проанализируй документ и извлеки ключевую информацию.")
 
 uploaded_files = st.file_uploader(
-    "Загрузите файлы любого формата (PDF, DOCX, DOC, PPTX, PPT, TXT, PNG, JPG, JPEG)",
+    "Загрузите файлы любого формата (PDF, DOCX, DOC, PPTX, PPT, TXT, PNG, JPG, JPEG, WEBP)",
     type=["pdf", "docx", "doc", "pptx", "ppt", "txt", "png", "jpg", "jpeg", "webp"],
     accept_multiple_files=True
 )
+
 
 def extract_file_content(file):
     """Извлекает base64-представление и текстовое содержимое файла в зависимости от типа."""
@@ -68,13 +69,13 @@ def extract_file_content(file):
     b64_str = ""
     extracted_text = f"Файл: {filename}\n"
 
-    # 1. Изображения
+    # Изображения
     if ext in ["png", "jpg", "jpeg", "webp"]:
         b64_encoded = base64.b64encode(file_bytes).decode("utf-8")
         b64_str = f"data:image/{ext};base64,{b64_encoded}"
         extracted_text += "[Изображение загружено]"
 
-    # 2. PDF документы
+    # PDF документы
     elif ext == "pdf":
         b64_encoded = base64.b64encode(file_bytes).decode("utf-8")
         b64_str = f"data:application/pdf;base64,{b64_encoded}"
@@ -86,9 +87,9 @@ def extract_file_content(file):
             except Exception as e:
                 extracted_text += f"[Не удалось извлечь текст из PDF: {e}]"
         else:
-            extracted_text += "[Библиотека pypdf не установлена, извлечение текста пропущено]"
+            extracted_text += "[Библиотека pypdf не установлена]"
 
-    # 3. Word документы (DOCX)
+    # Word документы (DOCX)
     elif ext == "docx":
         b64_encoded = base64.b64encode(file_bytes).decode("utf-8")
         b64_str = f"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64_encoded}"
@@ -102,7 +103,7 @@ def extract_file_content(file):
         else:
             extracted_text += "[Библиотека python-docx не установлена]"
 
-    # 4. PowerPoint презентации (PPTX)
+    # PowerPoint презентации (PPTX)
     elif ext == "pptx":
         b64_encoded = base64.b64encode(file_bytes).decode("utf-8")
         b64_str = f"data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,{b64_encoded}"
@@ -122,7 +123,7 @@ def extract_file_content(file):
         else:
             extracted_text += "[Библиотека python-pptx не установлена]"
 
-    # 5. Текстовые файлы (TXT)
+    # Текстовые файлы (TXT)
     elif ext == "txt":
         try:
             text_content = file_bytes.decode("utf-8", errors="ignore")
@@ -132,7 +133,7 @@ def extract_file_content(file):
         except Exception as e:
             extracted_text += f"[Ошибка чтения TXT: {e}]"
 
-    # 6. Остальные типы (DOC, PPT)
+    # Остальные форматы (DOC, PPT)
     else:
         b64_encoded = base64.b64encode(file_bytes).decode("utf-8")
         b64_str = f"data:application/octet-stream;base64,{b64_encoded}"
@@ -159,15 +160,19 @@ if st.button("🚀 Запустить обработку", type="primary"):
             pages_b64.append(b64_data)
             pages_txt.append(text_data)
 
-        # Сериализация в JSON-строки
+        # Сериализация списков в JSON-строки
         pages_b64_json = json.dumps(pages_b64)
         pages_txt_json = json.dumps(pages_txt)
 
-    st.info(f"Обработано файлов: {len(pages_b64)}. Отправка в ZeroGPU backend...")
+    st.info(f"Обработано файлов: {len(pages_b64)}. Подключение к HF Space...")
 
     try:
-        with st.spinner("Выполнение LangGraph пайплайна..."):
-            client = Client(hf_space_url, hf_token=hf_token)
+        with st.spinner("Выполнение LangGraph пайплайна на ZeroGPU..."):
+            # Исправленная инициализация клиента для всех версий gradio_client
+            try:
+                client = Client(hf_space_url, token=hf_token)
+            except TypeError:
+                client = Client(hf_space_url, hf_token=hf_token)
             
             result = client.predict(
                 str(hf_token),
@@ -181,6 +186,7 @@ if st.button("🚀 Запустить обработку", type="primary"):
 
         st.success("Обработка завершена успешно!")
         
+        # Отображение результатов
         if isinstance(result, dict):
             col1, col2 = st.columns(2)
             with col1:
