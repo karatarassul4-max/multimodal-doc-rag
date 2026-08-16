@@ -7,159 +7,155 @@ if str(root_dir) not in sys.path:
     sys.path.append(str(root_dir))
 
 import tempfile
-import uuid
 import streamlit as st
-from qdrant_client.models import PointStruct
+import fitz  # PyMuPDF для PDF
+from pptx import Presentation  # python-pptx для PPTX
 
-from src.embeddings.multimodal_encoder import MultimodalEncoder
-from src.parser.pdf_parser import DocumentParser
-from src.vectorstore.qdrant_client import VectorStoreManager
+st.set_page_config(page_title="AI Document & Presentation Explainer", layout="wide")
 
-st.set_page_config(page_title="Multimodal Document AI & RAG", layout="wide")
+st.title("📄 AI Explainer: Детальный разбор PDF и PPTX")
+st.write("Загрузите презентацию или PDF-документ, чтобы AI подробно разжевал всю информацию, термины и выводы.")
 
-st.title("📄 Multimodal Document AI & Explainer")
-st.write("Загружайте PDF-документы (отчеты, учебники, статьи) и получайте подробное объяснение и разбор материала от AI.")
+# --- Функция извлечения текста ---
+def extract_text_from_file(uploaded_file) -> tuple[str, int]:
+    """Извлекает весь текст из PDF или PPTX файла."""
+    file_ext = Path(uploaded_file.name).suffix.lower()
+    full_text = []
+    page_count = 0
 
-# Кешируем загрузку моделей
-@st.cache_resource
-def load_components():
-    encoder = MultimodalEncoder()
-    vector_store = VectorStoreManager()
-    vector_store.init_collection(collection_name="multimodal_docs", vector_size=512)
-    return encoder, vector_store
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_path = tmp_file.name
 
-encoder, vector_store = load_components()
+    if file_ext == ".pdf":
+        doc = fitz.open(tmp_path)
+        page_count = len(doc)
+        for page_num in range(page_count):
+            text = doc[page_num].get_text("text")
+            if text.strip():
+                full_text.append(f"--- Страница {page_num + 1} ---\n{text.strip()}")
+        doc.close()
 
-# --- Настройки API ключа в сайдбаре ---
-st.sidebar.header("⚙️ Настройки LLM")
-groq_api_key = st.sidebar.text_input("Groq API Key (опционально):", type="password", help="Бесплатный ключ от console.groq.com для включения LLM-генерации")
+    elif file_ext in [".pptx", ".ppt"]:
+        prs = Presentation(tmp_path)
+        page_count = len(prs.slides)
+        for slide_idx, slide in enumerate(prs.slides):
+            slide_text = []
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    slide_text.append(shape.text.strip())
+            if slide_text:
+                full_text.append(f"--- Слайд {slide_idx + 1} ---\n" + "\n".join(slide_text))
 
-# --- Секция 1: Загрузка и индексация документов ---
-st.sidebar.header("1. Загрузка документа")
-uploaded_file = st.sidebar.file_uploader("Выберите PDF файл", type=["pdf"])
+    return "\n\n".join(full_text), page_count
 
-if uploaded_file is not None:
-    if st.sidebar.button("Индексировать PDF"):
-        with st.spinner("Парсинг и векторизация документа..."):
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_path = tmp_file.name
+# --- Сайдбар с настройками ---
+st.sidebar.header("⚙️ Настройки")
+groq_api_key = st.sidebar.text_input(
+    "Groq API Key (обязательно):", 
+    type="password", 
+    help="Бесплатный ключ от console.groq.com"
+)
 
-            try:
-                parser = DocumentParser(tmp_path)
-                pages = parser.extract_text_by_page()
+# Контейнер для отображения логов процесса
+log_container = st.expander("🛠️ Логи выполнения (Debug Info)", expanded=True)
 
-                points = []
-                for page in pages:
-                    if not page["text"]:
-                        continue
+def log_msg(msg: str, status: str = "info"):
+    with log_container:
+        if status == "success":
+            st.success(f"[LOG]: {msg}")
+        elif status == "warning":
+            st.warning(f"[LOG]: {msg}")
+        elif status == "error":
+            st.error(f"[LOG]: {msg}")
+        else:
+            st.info(f"[LOG]: {msg}")
 
-                    vector = encoder.encode_text(page["text"])
-                    point_id = str(uuid.uuid4())
+# --- Загрузка файла ---
+uploaded_file = st.file_uploader("Загрузите PDF или PPTX файл", type=["pdf", "pptx"])
 
-                    points.append(
-                        PointStruct(
-                            id=point_id,
-                            vector=vector,
-                            payload={
-                                "filename": uploaded_file.name,
-                                "page": page["page"],
-                                "text": page["text"]
-                            }
-                        )
-                    )
+user_instruction = st.text_area(
+    "Что именно нужно разжевать?", 
+    value="Подробно объясни ключевые темы, термины, цифры и выводы из этого файла простым языком.",
+    height=100
+)
 
-                if points:
-                    vector_store.upsert_vectors(
-                        collection_name="multimodal_docs", 
-                        points=points
-                    )
-                    st.sidebar.success(f"Заиндексировано страниц: {len(points)}")
-                else:
-                    st.sidebar.warning("В файле не найдено текста.")
-            except Exception as e:
-                st.sidebar.error(f"Ошибка при обработке: {str(e)}")
+# --- Кнопка генерации ---
+if st.button("🚀 Объяснить подробно (AI Analysis)"):
+    log_msg("Кнопка нажата!", "info")
 
-# --- Секция 2: Подробный AI-разбор ---
-st.header("2. Задать вопрос или запросить разбор темы")
-query = st.text_input("О чём вы хотите узнать подробно из документа?", placeholder="Например: Объясни подробно архитектуру модели или распиши ключевые финансовые показатели")
+    if not uploaded_file:
+        log_msg("Ошибка: Файл не загружен.", "error")
+        st.error("Пожалуйста, загрузите PDF или PPTX файл.")
+        st.stop()
 
-top_k = st.slider("Количество релевантных страниц для анализа:", min_value=1, max_value=5, value=3)
+    if not groq_api_key.strip():
+        log_msg("Ошибка: API ключ Groq не введен.", "error")
+        st.error("Пожалуйста, введите Groq API Key в меню слева.")
+        st.stop()
 
-if st.button("🚀 Объяснить подробно (AI Analysis)") and query:
-    with st.spinner("Поиск информации и формирование подробного разбора..."):
-        try:
-            query_vector = encoder.encode_text(query)
+    # 1. Извлечение текста
+    log_msg(f"Начинаем извлечение текста из файла: {uploaded_file.name}", "info")
+    try:
+        extracted_text, total_pages = extract_text_from_file(uploaded_file)
+        log_msg(f"Текст успешно извлечен! Обработано страниц/слайдов: {total_pages}. Длина текста: {len(extracted_text)} символов.", "success")
+    except Exception as e:
+        log_msg(f"Ошибка при парсинге файла: {str(e)}", "error")
+        st.error(f"Не удалось прочитать файл: {str(e)}")
+        st.stop()
 
-            search_result = vector_store.client.query_points(
-                collection_name="multimodal_docs",
-                query=query_vector,
-                limit=top_k
-            )
+    if not extracted_text.strip():
+        log_msg("Ошибка: Файл пуст или содержит только несчитываемые изображения.", "warning")
+        st.warning("В файле не найден текст для анализа.")
+        st.stop()
 
-            results = search_result.points
+    # 2. Подготовка промпта
+    log_msg("Формируем промпт для Llama 3.3...", "info")
+    # Ограничиваем объём текста, если документ слишком огромный (чтобы влез в контекст)
+    truncated_text = extracted_text[:30000]
 
-            if results:
-                # Формируем единый контекст из найденных страниц
-                context_blocks = []
-                for idx, hit in enumerate(results):
-                    payload = hit.payload or {}
-                    page_num = payload.get("page", "?")
-                    text = payload.get("text", "")
-                    context_blocks.append(f"--- Страница {page_num} ---\n{text}")
+    prompt = f"""Вы — экспертный аналитик и преподаватель. Ваши ответы всегда глубокие, структурированные и легко усваиваемые.
 
-                full_context = "\n\n".join(context_blocks)
+ЗАДАЧА ПОЛЬЗОВАТЕЛЯ:
+{user_instruction}
 
-                # Системный промпт для детального объяснения
-                prompt = f"""Вы — экспертный AI-преподаватель и аналитик. 
-Используя приведенный ниже контекст из PDF-документа, дайте ПОДРОБНЫЙ и ДЕТАЛЬНЫЙ ответ на вопрос пользователя.
+СОДЕРЖИМОЕ ДОКУМЕНТА:
+{truncated_text}
 
-ТРЕБОВАНИЯ К ОТВЕТУ:
-1. Подробно объясните суть темы простым и понятным языком.
-2. Разбейте ответ на логические блоки с заголовками.
-3. Выделите ключевые термины, формулы или факты.
-4. Укажите, с каких конкретно страниц взята информация.
-5. Если в контексте есть детали или цифры, обязательно приведите их.
-
-ВОПРОС ПОЛЬЗОВАТЕЛЯ: {query}
-
-КОНТЕКСТ ИЗ ДОКУМЕНТА:
-{full_context}
+ИНСТРУКЦИЯ К ОТВЕТУ:
+1. Дайте подробное и развернутое объяснение материала.
+2. Используйте чёткие логические заголовки, списки и выделения ключевых терминов.
+3. Поясните сложные понятия и приведите практические примеры или выводы на основе документа.
+4. Отвечайте на русском языке.
 """
 
-# Если введен API ключ Groq
-                if groq_api_key.strip():
-                    try:
-                        from groq import Groq
-                        
-                        client = Groq(api_key=groq_api_key.strip())
-                        chat_completion = client.chat.completions.create(
-                            messages=[{"role": "user", "content": prompt}],
-                            model="llama-3.3-70b-versatile",
-                            temperature=0.3,
-                            max_tokens=2048,
-                        )
-                        ai_response = chat_completion.choices[0].message.content
-                        st.markdown("### 📚 Подробное объяснение от AI")
-                        st.markdown(ai_response)
-                    except ModuleNotFoundError:
-                        st.error("Пакет 'groq' еще устанавливается на сервере. Подождите 10-15 секунд и попробуйте снова.")
-                    except Exception as groq_err:
-                        st.error(f"Ошибка при вызове Groq API: {str(groq_err)}")
-                else:
-                    # Режим без API-ключа: показываем извлеченный текст
-                    st.success("✅ Релевантные страницы найдены и извлечены!")
-                    st.markdown("### 📋 Извлеченный контекст из документа:")
-                    st.info("Введите бесплатный Groq API Key в меню слева для автоматической генерации развернутого ответа через Llama 3.3.")
-                    st.text_area("Скомпонованный контекст:", full_context, height=300)
+    # 3. Вызов Groq API
+    log_msg("Отправка запроса в Groq API (модель llama-3.3-70b-versatile)...", "info")
+    try:
+        from groq import Groq
+        client = Groq(api_key=groq_api_key.strip())
+        
+        with st.spinner("LLM генерирует подробный разбор материала..."):
+            completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile",
+                temperature=0.3,
+                max_tokens=4096,
+            )
+            
+            ai_output = completion.choices[0].message.content
+            log_msg("Ответ от Groq API успешно получен!", "success")
 
-                # Показываем исходные карточки
-                st.subheader("📌 Источники (найденные страницы):")
-                for idx, hit in enumerate(results):
-                    payload = hit.payload or {}
-                    with st.expander(f"Страница {payload.get('page')} (Score: {hit.score:.4f})"):
-                        st.write(payload.get("text"))
-            else:
-                st.info("Ничего не найдено по данному запросу.")
-        except Exception as e:
-            st.error(f"Ошибка выполнения: {str(e)}")
+            st.markdown("---")
+            st.markdown("### 📚 Подробный разбор от AI:")
+            st.markdown(ai_output)
+
+            with st.expander("📄 Исходный текст из файла"):
+                st.text_area("Извлеченный текст:", extracted_text, height=300)
+
+    except ModuleNotFoundError:
+        log_msg("Пакет 'groq' еще не установлен на сервере Streamlit.", "error")
+        st.error("Пакет 'groq' еще устанавливается на сервере. Подождите 20 секунд и нажмите кнопку снова.")
+    except Exception as api_err:
+        log_msg(f"Ошибка при вызове Groq API: {str(api_err)}", "error")
+        st.error(f"Ошибка вызова LLM: {str(api_err)}")
