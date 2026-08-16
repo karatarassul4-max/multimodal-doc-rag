@@ -19,3 +19,4 @@ pillow>=10.2.0
 # Dev & Utils
 pydantic>=2.6.0
 python-dotenv>=1.0.1
+gradio_client>=0.15.0
