@@ -1,123 +1,97 @@
-import io
+import os
+import json
 import base64
-import tempfile
-import traceback
 import streamlit as st
-import fitz  # PyMuPDF
-from PIL import Image
 from gradio_client import Client
 
-st.set_page_config(page_title="Streamlit + Gradio ZeroGPU Explainer", layout="wide")
+st.set_page_config(
+    page_title="Multimodal Document AI",
+    page_icon="📄",
+    layout="wide"
+)
 
-st.title("⚡ Document Explainer (Streamlit Client + ZeroGPU Backend)")
+st.title("📄 Multimodal Document AI & RAG")
+st.write("Загрузите документ или изображения и отправьте их на обработку в Hugging Face ZeroGPU backend.")
 
-# --- Инициализация системных логов в session_state ---
-if "logs" not in st.session_state:
-    st.session_state.logs = []
+# Sidebar с настройками
+st.sidebar.header("Настройки подключения")
+hf_space_url = st.sidebar.text_input("HF Space URL / Name", value="your-username/your-space-name")
+hf_token = st.sidebar.text_input("Hugging Face Token", type="password")
 
-def log(msg: str):
-    st.session_state.logs.append(msg)
+st.sidebar.markdown("---")
+detail_level = st.sidebar.selectbox("Уровень детализации", ["Стандартный", "Глубокий"], index=1)
+item_label = st.sidebar.text_input("Метка элементов", value="Страница")
 
-# --- Чтение секретов ---
-HF_SPACE_NAME = st.secrets.get("HF_SPACE_NAME", "karatarassul4/langgraph-vision-explainer")
-HF_TOKEN = st.secrets.get("HF_TOKEN", "")
+# Основной интерфейс
+user_instruction = st.text_area("Инструкция / Запрос к документу", value="Проанализируй документ и извлеки ключевую информацию.")
 
-# Боковая панель: статус и логи
-st.sidebar.header("⚙️ Конфигурация")
-if HF_SPACE_NAME and HF_TOKEN:
-    st.sidebar.success(f"Connected: `{HF_SPACE_NAME}`")
-else:
-    st.sidebar.error("Проверьте Secrets в Streamlit Cloud!")
+uploaded_files = st.file_uploader(
+    "Загрузите страницы документа (PNG, JPG, JPEG)",
+    type=["png", "jpg", "jpeg"],
+    accept_multiple_files=True
+)
 
-with st.sidebar.expander("📋 Логи работы (Real-time)", expanded=True):
-    if st.button("Очистить логи"):
-        st.session_state.logs = []
-        st.rerun()
-    log_box = st.empty()
-    log_box.code("\n".join(st.session_state.logs) if st.session_state.logs else "Ожидание запуска...", language="text")
-
-uploaded_file = st.file_uploader("Загрузите PDF файл", type=["pdf"])
-user_instruction = st.text_area("Фокус-указания для AI:", value="Подробный разбор всех графиков, схем и текста.")
-
-def image_to_base64(pil_image: Image.Image) -> str:
-    buffered = io.BytesIO()
-    pil_image.convert("RGB").save(buffered, format="JPEG")
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-if st.button("🚀 Отправить на ZeroGPU"):
-    if not uploaded_file:
-        st.error("Загрузите PDF файл!")
+if st.button("🚀 Запустить обработку", type="primary"):
+    if not hf_token:
+        st.error("Пожалуйста, укажите Hugging Face Token в боковой панели.")
         st.stop()
         
-    log(f"Начало обработки файла: {uploaded_file.name}")
-    log_box.code("\n".join(st.session_state.logs), language="text")
+    if not uploaded_files:
+        st.warning("Загрузите хотя бы один файл для обработки.")
+        st.stop()
 
-    file_ext = uploaded_file.name.split(".")[-1].lower()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_path = tmp_file.name
+    with st.spinner("Подготовка файлов и кодирование в Base64..."):
+        pages_b64 = []
+        pages_txt = []
+        
+        for file in uploaded_files:
+            file_bytes = file.read()
+            b64_encoded = base64.b64encode(file_bytes).decode("utf-8")
+            pages_b64.append(f"data:{file.type};base64,{b64_encoded}")
+            pages_txt.append(file.name)
 
-    pages_b64 = []
-    pages_txt = []
+        # Сериализация списков в JSON-строки
+        pages_b64_json = json.dumps(pages_b64)
+        pages_txt_json = json.dumps(pages_txt)
 
-    if file_ext == "pdf":
-        doc = fitz.open(tmp_path)
-        log(f"Извлечение страниц из PDF (Всего страниц: {len(doc)})...")
-        for page_idx in range(len(doc)):
-            page = doc[page_idx]
-            pix = page.get_pixmap(dpi=150)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            pages_b64.append(image_to_base64(img))
-            pages_txt.append(page.get_text("text"))
-        doc.close()
-
-    log(f"Подготовка payload: {len(pages_b64)} изображений base64...")
-    log_box.code("\n".join(st.session_state.logs), language="text")
+    st.info(f"Подготовлено страниц: {len(pages_b64)}. Подключение к HF Space...")
 
     try:
-        with st.spinner("Запуск обработки на ZeroGPU..."):
-            log(f"Инициализация Gradio Client для {HF_SPACE_NAME}...")
-            client = Client(HF_SPACE_NAME, token=HF_TOKEN)
-
-            log("Отправка запроса в Gradio API...")
-            log_box.code("\n".join(st.session_state.logs), language="text")
-
-            # Быстрый и надежный вызов по умолчанию без жесткой привязки к api_name
-            # src/ui/streamlit_app.py
-
-            # src/ui/streamlit_app.py
-
+        with st.spinner("Выполнение LangGraph пайплайна на ZeroGPU..."):
+            client = Client(hf_space_url, hf_token=hf_token)
+            
             result = client.predict(
-                str(HF_TOKEN),
+                str(hf_token),
                 str(user_instruction),
-                "Глубокий",
-                "Страница",
-                pages_b64,
-                pages_txt,
+                str(detail_level),
+                str(item_label),
+                pages_b64_json,
+                pages_txt_json,
                 api_name="/predict"
             )
 
-            log("Запрос успешно выполнен!")
-            log_box.code("\n".join(st.session_state.logs), language="text")
-
-            st.success("Обработка завершена успешно!")
-            st.sidebar.metric("Оценка качества", f"{result['quality_score']}/10")
-            st.sidebar.write(f"Фидбек: {result['critic_feedback']}")
-
-            st.markdown("---")
-            st.markdown("## 📸 Разбор страниц")
-            for text in result.get("vision_analyses", []):
-                st.markdown(text)
-
-            st.markdown("---")
-            st.markdown("## 🏛️ Итоговый отчет")
-            st.markdown(result.get("final_output", ""))
+        st.success("Обработка завершена успешно!")
+        
+        # Отображение результатов
+        if isinstance(result, dict):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Оценка качества (Quality Score)", result.get("quality_score", 0))
+            with col2:
+                st.metric("Повторные попытки (Retries)", result.get("retry_count", 0))
+                
+            st.subheader("Финал вывода")
+            st.markdown(result.get("final_output", "Нет ответа"))
+            
+            st.subheader("Обратная связь критика")
+            st.info(result.get("critic_feedback", "Нет отзывов"))
+            
+            with st.expander("Постраничный анализ"):
+                for idx, analysis in enumerate(result.get("vision_analyses", [])):
+                    st.write(f"**Страница {idx + 1}:** {analysis}")
+        else:
+            st.json(result)
 
     except Exception as e:
-        err_msg = f"[ERROR] {type(e).__name__}: {str(e)}"
-        log(err_msg)
-        log_box.code("\n".join(st.session_state.logs), language="text")
-        
-        st.error(f"**Ошибка вызова API:** `{type(e).__name__}: {str(e)}`")
-        with st.expander("🔍 Подробный Traceback"):
-            st.code(traceback.format_exc())
+        st.error(f"Ошибка при вызове backend API: {str(e)}")
+        st.exception(e)
