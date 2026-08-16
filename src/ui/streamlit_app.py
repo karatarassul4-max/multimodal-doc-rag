@@ -3,29 +3,28 @@ import base64
 import tempfile
 import streamlit as st
 import fitz  # PyMuPDF
-from pptx import Presentation
 from PIL import Image
 from gradio_client import Client
 
-st.set_page_config(page_title="Streamlit + Gradio ZeroGPU LangGraph Explainer", layout="wide")
+st.set_page_config(page_title="Streamlit + Gradio ZeroGPU Explainer", layout="wide")
 
-st.title("⚡ Streamlit + Hugging Face ZeroGPU LangGraph Explainer")
+st.title("⚡ Document Explainer (Streamlit Client + ZeroGPU Backend)")
 
-st.sidebar.header("⚙️ Settings")
-space_name = st.sidebar.text_input("HF Space Name:", value="your-username/your-space-name")
-hf_token = st.sidebar.text_input("Hugging Face Token (hf_...):", type="password")
+st.sidebar.header("⚙️ Конфигурация")
+space_name = st.sidebar.text_input("HF Space Name (username/space-name):")
+hf_token = st.sidebar.text_input("Hugging Face Token:", type="password")
 
-uploaded_file = st.file_uploader("Загрузите PDF или PPTX документ", type=["pdf", "pptx"])
-user_instruction = st.text_area("Фокус-указания для AI:", value="Детальный разбор всех схем и терминов.")
+uploaded_file = st.file_uploader("Загрузите PDF файл", type=["pdf"])
+user_instruction = st.text_area("Фокус-указания для AI:", value="Подробный разбор всех графиков, схем и текста.")
 
 def image_to_base64(pil_image: Image.Image) -> str:
     buffered = io.BytesIO()
     pil_image.convert("RGB").save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-if st.button("🚀 Запустить обработку на ZeroGPU"):
+if st.button("🚀 Отправить на ZeroGPU"):
     if not uploaded_file or not hf_token or not space_name:
-        st.error("Заполните все поля!")
+        st.error("Заполните HF Space Name, HF Token и загрузите файл!")
         st.stop()
 
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -46,26 +45,24 @@ if st.button("🚀 Запустить обработку на ZeroGPU"):
             pages_txt.append(page.get_text("text"))
         doc.close()
 
-    item_label = "Страница" if file_ext == "pdf" else "Слайд"
-
-    st.info("Отправка запроса на Hugging Face ZeroGPU Space...")
+    st.info("Подключение к Hugging Face Space...")
 
     try:
-        with st.spinner("ZeroGPU A100 ускоритель выполняет LangGraph граф..."):
+        with st.spinner("Запуск обработки на ZeroGPU A100..."):
             client = Client(space_name, hf_token=hf_token)
             result = client.predict(
                 hf_token=hf_token,
                 user_instruction=user_instruction,
                 detail_level="Глубокий",
-                item_label=item_label,
+                item_label="Страница",
                 pages_base64=pages_b64,
                 pages_text=pages_txt,
                 api_name="/predict"
             )
 
-            st.success("Готово! Данные успешно обработаны на Nvidia A100 ZeroGPU.")
+            st.success("Обработка завершена успешно!")
             st.sidebar.metric("Оценка качества", f"{result['quality_score']}/10")
-            st.sidebar.write(f"Фидбек критика: {result['critic_feedback']}")
+            st.sidebar.write(f"Фидбек: {result['critic_feedback']}")
 
             st.markdown("---")
             st.markdown("## 📸 Разбор страниц")
@@ -77,4 +74,4 @@ if st.button("🚀 Запустить обработку на ZeroGPU"):
             st.markdown(result["final_output"])
 
     except Exception as e:
-        st.error(f"Ошибка при вызове ZeroGPU: {str(e)}")
+        st.error(f"Ошибка при вызове: {str(e)}")
