@@ -82,15 +82,14 @@ if st.button("🚀 Отправить на ZeroGPU"):
             log("Отправка запроса в Gradio API...")
             log_box.code("\n".join(st.session_state.logs), language="text")
 
-            # Передача именованных аргументов
+            # Быстрый и надежный вызов по умолчанию без жесткой привязки к api_name
             result = client.predict(
-                hf_token=HF_TOKEN,
-                user_instruction=user_instruction,
-                detail_level="Глубокий",
-                item_label="Страница",
-                pages_base64=pages_b64,
-                pages_text=pages_txt,
-                api_name="/predict"
+                HF_TOKEN,
+                user_instruction,
+                "Глубокий",
+                "Страница",
+                pages_b64,
+                pages_txt
             )
 
             log("Запрос успешно выполнен!")
