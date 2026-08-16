@@ -127,28 +127,31 @@ if st.button("🚀 Объяснить подробно (AI Analysis)") and query
 {full_context}
 """
 
-                # Если есть API ключ Groq — вызываем Llama-3.3-70b
-                if groq_api_key:
+# Если введен API ключ Groq
+                if groq_api_key.strip():
                     try:
                         from groq import Groq
-                        client = Groq(api_key=groq_api_key)
+                        
+                        client = Groq(api_key=groq_api_key.strip())
                         chat_completion = client.chat.completions.create(
                             messages=[{"role": "user", "content": prompt}],
                             model="llama-3.3-70b-versatile",
+                            temperature=0.3,
+                            max_tokens=2048,
                         )
                         ai_response = chat_completion.choices[0].message.content
                         st.markdown("### 📚 Подробное объяснение от AI")
                         st.markdown(ai_response)
+                    except ModuleNotFoundError:
+                        st.error("Пакет 'groq' еще устанавливается на сервере. Подождите 10-15 секунд и попробуйте снова.")
                     except Exception as groq_err:
-                        st.error(f"Ошибка вызова Groq API: {str(groq_err)}")
+                        st.error(f"Ошибка при вызове Groq API: {str(groq_err)}")
                 else:
-                    # Режим без API-ключа: показываем подготовленный системный промпт и извлеченные факты
+                    # Режим без API-ключа: показываем извлеченный текст
                     st.success("✅ Релевантные страницы найдены и извлечены!")
-                    st.markdown("### 📋 Подготовленный контекст для детального разбора:")
-                    st.markdown("*(Добавьте бесплатный Groq API Key в меню слева для автоматической генерации связного текста через Llama 3.3)*")
-                    
-                    st.subheader("Скомпонованный контекст для LLM:")
-                    st.text_area("Промпт + Извлеченный текст:", prompt, height=350)
+                    st.markdown("### 📋 Извлеченный контекст из документа:")
+                    st.info("Введите бесплатный Groq API Key в меню слева для автоматической генерации развернутого ответа через Llama 3.3.")
+                    st.text_area("Скомпонованный контекст:", full_context, height=300)
 
                 # Показываем исходные карточки
                 st.subheader("📌 Источники (найденные страницы):")
