@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-# Добавляем корень проекта в sys.path для корректных импортов на Streamlit Cloud
+# Добавляем корень проекта в sys.path для корректных импортов
 root_dir = Path(__file__).resolve().parent.parent.parent
 if str(root_dir) not in sys.path:
     sys.path.append(str(root_dir))
@@ -15,29 +15,32 @@ from src.embeddings.multimodal_encoder import MultimodalEncoder
 from src.parser.pdf_parser import DocumentParser
 from src.vectorstore.qdrant_client import VectorStoreManager
 
-st.set_page_config(page_title="Multimodal Document RAG", layout="wide")
+st.set_page_config(page_title="Multimodal Document AI & RAG", layout="wide")
 
-st.title("📄 Multimodal Document AI & RAG Search")
-st.write("Загружайте PDF-документы и ищите информацию по тексту и изображениям.")
+st.title("📄 Multimodal Document AI & Explainer")
+st.write("Загружайте PDF-документы (отчеты, учебники, статьи) и получайте подробное объяснение и разбор материала от AI.")
 
-# Кешируем загрузку тяжелых моделей в Streamlit
+# Кешируем загрузку моделей
 @st.cache_resource
 def load_components():
     encoder = MultimodalEncoder()
-    # Используем локальное файловое хранилище для Qdrant в бесплатном Streamlit Cloud
     vector_store = VectorStoreManager()
-    vector_store.init_collection(vector_size=512)
+    vector_store.init_collection(collection_name="multimodal_docs", vector_size=512)
     return encoder, vector_store
 
 encoder, vector_store = load_components()
 
+# --- Настройки API ключа в сайдбаре ---
+st.sidebar.header("⚙️ Настройки LLM")
+groq_api_key = st.sidebar.text_input("Groq API Key (опционально):", type="password", help="Бесплатный ключ от console.groq.com для включения LLM-генерации")
+
+# --- Секция 1: Загрузка и индексация документов ---
 st.sidebar.header("1. Загрузка документа")
 uploaded_file = st.sidebar.file_uploader("Выберите PDF файл", type=["pdf"])
 
 if uploaded_file is not None:
     if st.sidebar.button("Индексировать PDF"):
         with st.spinner("Парсинг и векторизация документа..."):
-            # Сохраняем временный файл
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                 tmp_file.write(uploaded_file.getvalue())
                 tmp_path = tmp_file.name
@@ -51,7 +54,6 @@ if uploaded_file is not None:
                     if not page["text"]:
                         continue
 
-                    # Генерируем эмбеддинг
                     vector = encoder.encode_text(page["text"])
                     point_id = str(uuid.uuid4())
 
@@ -62,7 +64,7 @@ if uploaded_file is not None:
                             payload={
                                 "filename": uploaded_file.name,
                                 "page": page["page"],
-                                "text": page["text"][:500]
+                                "text": page["text"]
                             }
                         )
                     )
@@ -72,45 +74,89 @@ if uploaded_file is not None:
                         collection_name="multimodal_docs", 
                         points=points
                     )
-                    st.sidebar.success(f"Успешно! Заиндексировано страниц: {len(points)}")
+                    st.sidebar.success(f"Заиндексировано страниц: {len(points)}")
                 else:
-                    st.sidebar.warning("В файле не найдено текста для индексации.")
+                    st.sidebar.warning("В файле не найдено текста.")
             except Exception as e:
                 st.sidebar.error(f"Ошибка при обработке: {str(e)}")
 
-st.header("2. Мультимодальный поиск")
-query = st.text_input("Введите поисковый запрос (например: 'график продаж' или 'архитектура'):")
+# --- Секция 2: Подробный AI-разбор ---
+st.header("2. Задать вопрос или запросить разбор темы")
+query = st.text_input("О чём вы хотите узнать подробно из документа?", placeholder="Например: Объясни подробно архитектуру модели или распиши ключевые финансовые показатели")
 
-if st.button("Найти в документах") and query:
-    with st.spinner("Поиск по векторной базе..."):
+top_k = st.slider("Количество релевантных страниц для анализа:", min_value=1, max_value=5, value=3)
+
+if st.button("🚀 Объяснить подробно (AI Analysis)") and query:
+    with st.spinner("Поиск информации и формирование подробного разбора..."):
         try:
             query_vector = encoder.encode_text(query)
 
-            # Используем актуальный метод query_points вместо устаревшего search
             search_result = vector_store.client.query_points(
                 collection_name="multimodal_docs",
                 query=query_vector,
-                limit=3
+                limit=top_k
             )
 
-            st.subheader(f"Результаты по запросу: '{query}'")
-
-            # Извлекаем точки из ответа query_points
             results = search_result.points
 
             if results:
+                # Формируем единый контекст из найденных страниц
+                context_blocks = []
                 for idx, hit in enumerate(results):
                     payload = hit.payload or {}
-                    filename = payload.get("filename", "Unknown")
-                    page = payload.get("page", "-")
+                    page_num = payload.get("page", "?")
                     text = payload.get("text", "")
+                    context_blocks.append(f"--- Страница {page_num} ---\n{text}")
 
-                    with st.expander(
-                        f"Результат #{idx+1} | Файл: {filename} (Стр. {page}) | Score: {hit.score:.4f}"
-                    ):
-                        st.write("**Извлеченный фрагмент:**")
-                        st.write(text)
+                full_context = "\n\n".join(context_blocks)
+
+                # Системный промпт для детального объяснения
+                prompt = f"""Вы — экспертный AI-преподаватель и аналитик. 
+Используя приведенный ниже контекст из PDF-документа, дайте ПОДРОБНЫЙ и ДЕТАЛЬНЫЙ ответ на вопрос пользователя.
+
+ТРЕБОВАНИЯ К ОТВЕТУ:
+1. Подробно объясните суть темы простым и понятным языком.
+2. Разбейте ответ на логические блоки с заголовками.
+3. Выделите ключевые термины, формулы или факты.
+4. Укажите, с каких конкретно страниц взята информация.
+5. Если в контексте есть детали или цифры, обязательно приведите их.
+
+ВОПРОС ПОЛЬЗОВАТЕЛЯ: {query}
+
+КОНТЕКСТ ИЗ ДОКУМЕНТА:
+{full_context}
+"""
+
+                # Если есть API ключ Groq — вызываем Llama-3.3-70b
+                if groq_api_key:
+                    try:
+                        from groq import Groq
+                        client = Groq(api_key=groq_api_key)
+                        chat_completion = client.chat.completions.create(
+                            messages=[{"role": "user", "content": prompt}],
+                            model="llama-3.3-70b-versatile",
+                        )
+                        ai_response = chat_completion.choices[0].message.content
+                        st.markdown("### 📚 Подробное объяснение от AI")
+                        st.markdown(ai_response)
+                    except Exception as groq_err:
+                        st.error(f"Ошибка вызова Groq API: {str(groq_err)}")
+                else:
+                    # Режим без API-ключа: показываем подготовленный системный промпт и извлеченные факты
+                    st.success("✅ Релевантные страницы найдены и извлечены!")
+                    st.markdown("### 📋 Подготовленный контекст для детального разбора:")
+                    st.markdown("*(Добавьте бесплатный Groq API Key в меню слева для автоматической генерации связного текста через Llama 3.3)*")
+                    
+                    st.subheader("Скомпонованный контекст для LLM:")
+                    st.text_area("Промпт + Извлеченный текст:", prompt, height=350)
+
+                # Показываем исходные карточки
+                st.subheader("📌 Источники (найденные страницы):")
+                for idx, hit in enumerate(results):
+                    payload = hit.payload or {}
+                    with st.expander(f"Страница {payload.get('page')} (Score: {hit.score:.4f})"):
+                        st.write(payload.get("text"))
             else:
-                st.info("Ничего не найдено.")
+                st.info("Ничего не найдено по данному запросу.")
         except Exception as e:
-            st.error(f"Ошибка при выполнении поиска: {str(e)}")
+            st.error(f"Ошибка выполнения: {str(e)}")
