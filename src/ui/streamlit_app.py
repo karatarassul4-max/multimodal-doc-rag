@@ -84,12 +84,13 @@ if st.button("🚀 Отправить на ZeroGPU"):
 
             # Быстрый и надежный вызов по умолчанию без жесткой привязки к api_name
             result = client.predict(
-                HF_TOKEN,
-                user_instruction,
-                "Глубокий",
-                "Страница",
-                pages_b64,
-                pages_txt
+                hf_token=HF_TOKEN,
+                user_instruction=user_instruction,
+                detail_level="Глубокий",
+                item_label="Страница",
+                pages_base64=pages_b64,
+                pages_text=pages_txt,
+                api_name="/predict"
             )
 
             log("Запрос успешно выполнен!")
