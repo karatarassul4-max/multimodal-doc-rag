@@ -1,10 +1,11 @@
 # Web & UI
 streamlit>=1.32.0
 
-# LangChain Ecosystem
+# LangChain & LangGraph Ecosystem
 langchain>=0.2.0
 langchain-core>=0.2.0
 langchain-groq>=0.1.0
+langgraph>=0.1.0
 
 # LLM & Vision Direct Access
 groq>=0.4.0
