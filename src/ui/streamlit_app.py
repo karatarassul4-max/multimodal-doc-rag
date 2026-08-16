@@ -1,26 +1,29 @@
 import io
 import base64
+import logging
 import tempfile
+import traceback
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
 from gradio_client import Client
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("Streamlit_Client")
+
 st.set_page_config(page_title="Streamlit + Gradio ZeroGPU Explainer", layout="wide")
 
 st.title("⚡ Document Explainer (Streamlit Client + ZeroGPU Backend)")
 
-# --- Автоматическое считывание секретов ---
-# Streamlit подтянет их из Secrets в Cloud или из .streamlit/secrets.toml локально
-HF_SPACE_NAME = st.secrets.get("HF_SPACE_NAME", "")
+# --- Чтение секретов ---
+HF_SPACE_NAME = st.secrets.get("HF_SPACE_NAME", "karatarassul4/langgraph-vision-explainer")
 HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 
-# Опционально: отобразить статус подключения в боковой панели
 st.sidebar.header("⚙️ Статус подключения")
 if HF_SPACE_NAME and HF_TOKEN:
-    st.sidebar.success(f"Подключено к Space: `{HF_SPACE_NAME}`")
+    st.sidebar.success(f"Space: `{HF_SPACE_NAME}`")
 else:
-    st.sidebar.error("Секреты HF_SPACE_NAME или HF_TOKEN не найдены в Secrets!")
+    st.sidebar.error("HF_SPACE_NAME или HF_TOKEN не найдены в Secrets!")
 
 uploaded_file = st.file_uploader("Загрузите PDF файл", type=["pdf"])
 user_instruction = st.text_area("Фокус-указания для AI:", value="Подробный разбор всех графиков, схем и текста.")
@@ -36,7 +39,7 @@ if st.button("🚀 Отправить на ZeroGPU"):
         st.stop()
         
     if not HF_SPACE_NAME or not HF_TOKEN:
-        st.error("Ошибка конфигурации: Проверьте настройки Secrets в Streamlit!")
+        st.error("Ошибка конфигурации: Проверьте настройки Secrets!")
         st.stop()
 
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -57,21 +60,23 @@ if st.button("🚀 Отправить на ZeroGPU"):
             pages_txt.append(page.get_text("text"))
         doc.close()
 
-    st.info("Подключение к Hugging Face Space...")
+    logger.info(f"Извлечено страниц из PDF: {len(pages_b64)}")
 
     try:
-        with st.spinner("Запуск обработки на ZeroGPU A100..."):
-            # Заменили hf_token на token
+        with st.spinner("Запуск обработки на ZeroGPU..."):
+            logger.info(f"Инициализация Client('{HF_SPACE_NAME}')...")
             client = Client(HF_SPACE_NAME, token=HF_TOKEN)
             
+            logger.info("Отправка вызова client.predict()...")
             result = client.predict(
-            HF_TOKEN,
-            user_instruction,
-            "Глубокий",
-            "Страница",
-            pages_b64,
-            pages_txt
-        )
+                HF_TOKEN,
+                user_instruction,
+                "Глубокий",
+                "Страница",
+                pages_b64,
+                pages_txt
+            )
+
             st.success("Обработка завершена успешно!")
             st.sidebar.metric("Оценка качества", f"{result['quality_score']}/10")
             st.sidebar.write(f"Фидбек: {result['critic_feedback']}")
@@ -86,4 +91,8 @@ if st.button("🚀 Отправить на ZeroGPU"):
             st.markdown(result["final_output"])
 
     except Exception as e:
-        st.error(f"Ошибка при вызове: {str(e)}")
+        logger.error(f"Ошибка при вызове: {type(e).__name__} - {str(e)}")
+        logger.error(traceback.format_exc())
+        st.error(f"**Ошибка вызова API:** `{type(e).__name__}: {str(e)}`")
+        with st.expander("🔍 Подробности Traceback"):
+            st.code(traceback.format_exc())
