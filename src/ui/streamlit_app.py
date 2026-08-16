@@ -1,6 +1,5 @@
 import io
 import base64
-import logging
 import tempfile
 import traceback
 import streamlit as st
@@ -8,22 +7,34 @@ import fitz  # PyMuPDF
 from PIL import Image
 from gradio_client import Client
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("Streamlit_Client")
-
 st.set_page_config(page_title="Streamlit + Gradio ZeroGPU Explainer", layout="wide")
 
 st.title("⚡ Document Explainer (Streamlit Client + ZeroGPU Backend)")
+
+# --- Инициализация системных логов в session_state ---
+if "logs" not in st.session_state:
+    st.session_state.logs = []
+
+def log(msg: str):
+    st.session_state.logs.append(msg)
 
 # --- Чтение секретов ---
 HF_SPACE_NAME = st.secrets.get("HF_SPACE_NAME", "karatarassul4/langgraph-vision-explainer")
 HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 
-st.sidebar.header("⚙️ Статус подключения")
+# Боковая панель: статус и логи
+st.sidebar.header("⚙️ Конфигурация")
 if HF_SPACE_NAME and HF_TOKEN:
-    st.sidebar.success(f"Space: `{HF_SPACE_NAME}`")
+    st.sidebar.success(f"Connected: `{HF_SPACE_NAME}`")
 else:
-    st.sidebar.error("HF_SPACE_NAME или HF_TOKEN не найдены в Secrets!")
+    st.sidebar.error("Проверьте Secrets в Streamlit Cloud!")
+
+with st.sidebar.expander("📋 Логи работы (Real-time)", expanded=True):
+    if st.button("Очистить логи"):
+        st.session_state.logs = []
+        st.rerun()
+    log_box = st.empty()
+    log_box.code("\n".join(st.session_state.logs) if st.session_state.logs else "Ожидание запуска...", language="text")
 
 uploaded_file = st.file_uploader("Загрузите PDF файл", type=["pdf"])
 user_instruction = st.text_area("Фокус-указания для AI:", value="Подробный разбор всех графиков, схем и текста.")
@@ -35,12 +46,11 @@ def image_to_base64(pil_image: Image.Image) -> str:
 
 if st.button("🚀 Отправить на ZeroGPU"):
     if not uploaded_file:
-        st.error("Пожалуйста, загрузите PDF файл!")
+        st.error("Загрузите PDF файл!")
         st.stop()
         
-    if not HF_SPACE_NAME or not HF_TOKEN:
-        st.error("Ошибка конфигурации: Проверьте настройки Secrets!")
-        st.stop()
+    log(f"Начало обработки файла: {uploaded_file.name}")
+    log_box.code("\n".join(st.session_state.logs), language="text")
 
     file_ext = uploaded_file.name.split(".")[-1].lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as tmp_file:
@@ -52,6 +62,7 @@ if st.button("🚀 Отправить на ZeroGPU"):
 
     if file_ext == "pdf":
         doc = fitz.open(tmp_path)
+        log(f"Извлечение страниц из PDF (Всего страниц: {len(doc)})...")
         for page_idx in range(len(doc)):
             page = doc[page_idx]
             pix = page.get_pixmap(dpi=150)
@@ -60,22 +71,30 @@ if st.button("🚀 Отправить на ZeroGPU"):
             pages_txt.append(page.get_text("text"))
         doc.close()
 
-    logger.info(f"Извлечено страниц из PDF: {len(pages_b64)}")
+    log(f"Подготовка payload: {len(pages_b64)} изображений base64...")
+    log_box.code("\n".join(st.session_state.logs), language="text")
 
     try:
         with st.spinner("Запуск обработки на ZeroGPU..."):
-            logger.info(f"Инициализация Client('{HF_SPACE_NAME}')...")
+            log(f"Инициализация Gradio Client для {HF_SPACE_NAME}...")
             client = Client(HF_SPACE_NAME, token=HF_TOKEN)
-            
-            logger.info("Отправка вызова client.predict()...")
+
+            log("Отправка запроса в Gradio API...")
+            log_box.code("\n".join(st.session_state.logs), language="text")
+
+            # Передача именованных аргументов
             result = client.predict(
-                HF_TOKEN,
-                user_instruction,
-                "Глубокий",
-                "Страница",
-                pages_b64,
-                pages_txt
+                hf_token=HF_TOKEN,
+                user_instruction=user_instruction,
+                detail_level="Глубокий",
+                item_label="Страница",
+                pages_base64=pages_b64,
+                pages_text=pages_txt,
+                api_name="/predict"
             )
+
+            log("Запрос успешно выполнен!")
+            log_box.code("\n".join(st.session_state.logs), language="text")
 
             st.success("Обработка завершена успешно!")
             st.sidebar.metric("Оценка качества", f"{result['quality_score']}/10")
@@ -83,16 +102,18 @@ if st.button("🚀 Отправить на ZeroGPU"):
 
             st.markdown("---")
             st.markdown("## 📸 Разбор страниц")
-            for text in result["vision_analyses"]:
+            for text in result.get("vision_analyses", []):
                 st.markdown(text)
 
             st.markdown("---")
             st.markdown("## 🏛️ Итоговый отчет")
-            st.markdown(result["final_output"])
+            st.markdown(result.get("final_output", ""))
 
     except Exception as e:
-        logger.error(f"Ошибка при вызове: {type(e).__name__} - {str(e)}")
-        logger.error(traceback.format_exc())
+        err_msg = f"[ERROR] {type(e).__name__}: {str(e)}"
+        log(err_msg)
+        log_box.code("\n".join(st.session_state.logs), language="text")
+        
         st.error(f"**Ошибка вызова API:** `{type(e).__name__}: {str(e)}`")
-        with st.expander("🔍 Подробности Traceback"):
+        with st.expander("🔍 Подробный Traceback"):
             st.code(traceback.format_exc())
