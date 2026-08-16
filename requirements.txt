@@ -1,22 +1,5 @@
-# Web & UI
 streamlit>=1.32.0
-
-# LangChain & LangGraph Ecosystem
-langchain>=0.2.0
-langchain-core>=0.2.0
-langchain-groq>=0.1.0
-langgraph>=0.1.0
-
-# LLM & Vision Direct Access
-groq>=0.4.0
-
-# Document & Image Processing
+gradio_client>=0.15.0
 pymupdf>=1.23.26
 python-pptx>=0.6.23
-pdf2image>=1.17.0
 pillow>=10.2.0
-
-# Dev & Utils
-pydantic>=2.6.0
-python-dotenv>=1.0.1
-gradio_client>=0.15.0
