@@ -85,9 +85,11 @@ if st.button("🚀 Отправить на ZeroGPU"):
             # Быстрый и надежный вызов по умолчанию без жесткой привязки к api_name
             # src/ui/streamlit_app.py
 
+            # src/ui/streamlit_app.py
+
             result = client.predict(
-                HF_TOKEN,
-                user_instruction,
+                str(HF_TOKEN),
+                str(user_instruction),
                 "Глубокий",
                 "Страница",
                 pages_b64,
