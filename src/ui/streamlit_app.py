@@ -65,15 +65,13 @@ if st.button("🚀 Отправить на ZeroGPU"):
             client = Client(HF_SPACE_NAME, token=HF_TOKEN)
             
             result = client.predict(
-                hf_token=HF_TOKEN,
-                user_instruction=user_instruction,
-                detail_level="Глубокий",
-                item_label="Страница",
-                pages_base64=pages_b64,
-                pages_text=pages_txt,
-                api_name="/predict"
-            )
-
+            HF_TOKEN,
+            user_instruction,
+            "Глубокий",
+            "Страница",
+            pages_b64,
+            pages_txt
+        )
             st.success("Обработка завершена успешно!")
             st.sidebar.metric("Оценка качества", f"{result['quality_score']}/10")
             st.sidebar.write(f"Фидбек: {result['critic_feedback']}")
