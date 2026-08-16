@@ -61,7 +61,9 @@ if st.button("🚀 Отправить на ZeroGPU"):
 
     try:
         with st.spinner("Запуск обработки на ZeroGPU A100..."):
-            client = Client(HF_SPACE_NAME, hf_token=HF_TOKEN)
+            # Заменили hf_token на token
+            client = Client(HF_SPACE_NAME, token=HF_TOKEN)
+            
             result = client.predict(
                 hf_token=HF_TOKEN,
                 user_instruction=user_instruction,
