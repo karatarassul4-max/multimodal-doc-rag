@@ -10,9 +10,17 @@ st.set_page_config(page_title="Streamlit + Gradio ZeroGPU Explainer", layout="wi
 
 st.title("⚡ Document Explainer (Streamlit Client + ZeroGPU Backend)")
 
-st.sidebar.header("⚙️ Конфигурация")
-space_name = st.sidebar.text_input("HF Space Name (username/space-name):")
-hf_token = st.sidebar.text_input("Hugging Face Token:", type="password")
+# --- Автоматическое считывание секретов ---
+# Streamlit подтянет их из Secrets в Cloud или из .streamlit/secrets.toml локально
+HF_SPACE_NAME = st.secrets.get("HF_SPACE_NAME", "")
+HF_TOKEN = st.secrets.get("HF_TOKEN", "")
+
+# Опционально: отобразить статус подключения в боковой панели
+st.sidebar.header("⚙️ Статус подключения")
+if HF_SPACE_NAME and HF_TOKEN:
+    st.sidebar.success(f"Подключено к Space: `{HF_SPACE_NAME}`")
+else:
+    st.sidebar.error("Секреты HF_SPACE_NAME или HF_TOKEN не найдены в Secrets!")
 
 uploaded_file = st.file_uploader("Загрузите PDF файл", type=["pdf"])
 user_instruction = st.text_area("Фокус-указания для AI:", value="Подробный разбор всех графиков, схем и текста.")
@@ -23,8 +31,12 @@ def image_to_base64(pil_image: Image.Image) -> str:
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 if st.button("🚀 Отправить на ZeroGPU"):
-    if not uploaded_file or not hf_token or not space_name:
-        st.error("Заполните HF Space Name, HF Token и загрузите файл!")
+    if not uploaded_file:
+        st.error("Пожалуйста, загрузите PDF файл!")
+        st.stop()
+        
+    if not HF_SPACE_NAME or not HF_TOKEN:
+        st.error("Ошибка конфигурации: Проверьте настройки Secrets в Streamlit!")
         st.stop()
 
     file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -49,9 +61,9 @@ if st.button("🚀 Отправить на ZeroGPU"):
 
     try:
         with st.spinner("Запуск обработки на ZeroGPU A100..."):
-            client = Client(space_name, hf_token=hf_token)
+            client = Client(HF_SPACE_NAME, hf_token=HF_TOKEN)
             result = client.predict(
-                hf_token=hf_token,
+                hf_token=HF_TOKEN,
                 user_instruction=user_instruction,
                 detail_level="Глубокий",
                 item_label="Страница",
